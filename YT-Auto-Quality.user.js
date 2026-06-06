@@ -43,53 +43,54 @@
     }, true);
 
     function checkAndSetQuality() {
-        const player = document.getElementById("movie_player");
+    const player = document.getElementById("movie_player");
+    if (!player || typeof player.getVideoData !== 'function') return;
 
-        if (!player || typeof player.getVideoData !== 'function' || typeof player.getAvailableQualityLevels !== 'function') {
-            return;
-        }
+    const videoData = player.getVideoData();
+    const vid = videoData?.video_id;
+    if (!vid) return;
 
-        const videoData = player.getVideoData();
-        const vid = videoData ? videoData.video_id : null;
-        if (!vid) return;
-
-        if (vid !== currentVideoId) {
-            currentVideoId = vid;
-            isDoneForThisVideo = false;
-            manualOverride = false;
-            console.log(`[YT Auto Quality] 🎬 New video detected: ${vid}`);
-        }
-
-        if (isDoneForThisVideo || manualOverride) return;
-
-        const levels = player.getAvailableQualityLevels();
-        if (!levels || levels.length <= 1) return;
-
-        const target = QUALITY_PREFERENCE.find(q => levels.includes(q)) || levels[0];
-        if (!target || target === 'auto') return;
-
-        const current = player.getPlaybackQuality();
-
-        if (current === target) {
-            isDoneForThisVideo = true;
-            console.log(`[YT Auto Quality] ✅ Successfully locked to ${target}`);
-            return;
-        }
-
-        const state = player.getPlayerState();
-        if (state !== 1 && state !== 3) return;
-
-        try {
-            if (typeof player.setPlaybackQualityRange === 'function') {
-                player.setPlaybackQualityRange(target, target);
-            }
-            if (typeof player.setPlaybackQuality === 'function') {
-                player.setPlaybackQuality(target);
-            }
-        } catch (e) {
-            console.error("[YT Auto Quality] Error setting quality:", e);
-        }
+    if (vid !== currentVideoId) {
+        currentVideoId = vid;
+        isDoneForThisVideo = false;
+        manualOverride = false;
     }
+
+    if (isDoneForThisVideo || manualOverride) return;
+
+    const levels = player.getAvailableQualityLevels?.();
+    if (!levels || levels.length <= 1) return;
+
+    const target = QUALITY_PREFERENCE.find(q => levels.includes(q)) || levels[0];
+    if (!target || target === 'auto') return;
+
+    const current = player.getPlaybackQuality();
+
+    // ✅ FIX 1: Also check label — "Auto" means not truly locked
+    const label = player.getPlaybackQualityLabel?.() || "";
+    const isAutoMode = label.toLowerCase().includes("auto");
+
+    if (current === target && !isAutoMode) {
+        isDoneForThisVideo = true;
+        console.log(`[YT Auto Quality] ✅ Locked to ${target}`);
+        return;
+    }
+
+    // ✅ FIX 2: Relaxed state guard — allow state -1, 5 (unstarted/cued) too
+    const state = player.getPlayerState();
+    if (state === 0 || state === 2) return; // only skip ended(0) or paused(2)
+
+    try {
+        if (typeof player.setPlaybackQualityRange === 'function') {
+            player.setPlaybackQualityRange(target, target);
+        }
+        if (typeof player.setPlaybackQuality === 'function') {
+            player.setPlaybackQuality(target);
+        }
+    } catch (e) {
+        console.error("[YT Auto Quality] Error setting quality:", e);
+    }
+}
 
     // ─────────────────────────────────────────────────────────────────
     // ★ THE OPTIMIZATION: INSTANT TRIGGERS
