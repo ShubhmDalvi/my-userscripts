@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Borderless Theater Mode
 // @namespace    https://tampermonkey.net/
-// @version      3.0
+// @version      3.1
 // @description  Makes YouTube's native Theater Mode fill the entire browser tab (Twitch-style).
 // @author       you
 // @match        https://www.youtube.com/*
@@ -116,18 +116,27 @@
    * JS Logic: Mirror 'theater' attribute and force window resizes
    * ---------------------------------------------------------------
    */
+  
   function syncActiveClass(flexy) {
+    if (!flexy) return;
+      
+    // BUG FIX: Check if we are actually on a watch page or live stream.
+    const isWatchPage = window.location.pathname.startsWith('/watch') || window.location.pathname.startsWith('/live');
     const isTheater = flexy.hasAttribute('theater');
-    document.documentElement.classList.toggle(ACTIVE_CLASS, isTheater);
+      
+    // The class will ONLY apply if theater is true AND we are on a video page
+    const shouldBeActive = isWatchPage && isTheater;
 
-    // YouTube's progress bar and controls rely on JS calculations.
-    // Firing a few resize events ensures the controls span the new width.
-    if (isTheater) {
+    document.documentElement.classList.toggle(ACTIVE_CLASS, shouldBeActive);
+
+    if (shouldBeActive) {
       setTimeout(() => window.dispatchEvent(new Event('resize')), 10);
       setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
       setTimeout(() => window.dispatchEvent(new Event('resize')), 500);
     }
   }
+
+  let flexyObserver = null;
 
   function watchForFlexy() {
     const flexy = document.querySelector('ytd-watch-flexy');
@@ -135,14 +144,17 @@
 
     syncActiveClass(flexy);
 
-    const observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if (mutation.attributeName === 'theater') {
-          syncActiveClass(flexy);
+    // Minor optimization: Prevent attaching duplicate observers on navigation
+    if (!flexyObserver) {
+      flexyObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          if (mutation.attributeName === 'theater') {
+            syncActiveClass(flexy);
+          }
         }
-      }
-    });
-    observer.observe(flexy, { attributes: true, attributeFilter: ['theater'] });
+      });
+      flexyObserver.observe(flexy, { attributes: true, attributeFilter: ['theater'] });
+    }
     return true;
   }
 
@@ -154,11 +166,17 @@
 
   window.addEventListener('yt-navigate-finish', () => {
     attached = watchForFlexy();
+    
+    // Force a re-check when page loads to ensure URL validation catches the layout
+    const flexy = document.querySelector('ytd-watch-flexy');
+    if (flexy) syncActiveClass(flexy);
   });
 
   window.addEventListener('yt-navigate-start', () => {
-    const flexy = document.querySelector('ytd-watch-flexy');
-    if (!flexy || !document.contains(flexy)) {
+    // If we are navigating back to the homepage (or anywhere that isn't a video),
+    // immediately strip the class so the homepage doesn't "glitch" while loading.
+    const isWatchPage = window.location.pathname.startsWith('/watch') || window.location.pathname.startsWith('/live');
+    if (!isWatchPage) {
       document.documentElement.classList.remove(ACTIVE_CLASS);
     }
   });
