@@ -8,16 +8,7 @@ A centralized repository for all my custom Tampermonkey, Violentmonkey, and Grea
 2. Click the **[➔ Install]** link next to any script in the table below.
 3. Confirm the installation when the extension page pops up.
 
----
 
-## 📜 All Scripts
-
-| Script Name | Description | Action |
-| :--- | :--- | :--- |
-| **Twitch Max Quality Locker** | Forces Twitch streams to always lock onto the maximum engine-level quality. | [➔ Install](https://raw.githubusercontent.com/ShubhmDalvi/my-userscripts/main/Twitch-Engine-Level-Max-Quality-Locker.user.js) |
-| **YT Auto Quality (Optimized)** | Automatically optimizes and sets your preferred YouTube video quality settings seamlessly. | [➔ Install](https://raw.githubusercontent.com/ShubhmDalvi/my-userscripts/main/YT-Auto-Quality.user.js) |
-
----
 
 ## 🔄 Automatic Updates
 
