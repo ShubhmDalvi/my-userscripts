@@ -35,22 +35,11 @@
     // 1. THE BROWSER BACK BUTTON (POPSTATE)
     // ==========================================
     window.addEventListener('popstate', (e) => {
-        if (isWatchPage(lastUrl) && !isMiniplayerActive()) {
-            // 1. FREEZE! Stop YouTube from destroying the page
-            e.stopImmediatePropagation();
-
-            // 2. Shrink the video
-            triggerMiniplayer();
-
-            // 3. Wait a tiny moment, then gently load the new page in the background
-            setTimeout(() => {
-                const homeButton = document.querySelector('ytd-guide-entry-renderer a[href="/"], a#logo');
-                if (homeButton) {
-                    homeButton.click();
-                }
-            }, 150);
-        }
-    }, true); // 'true' catches it first
+    if (isWatchPage(lastUrl) && !isMiniplayerActive()) {
+        // Only activate the miniplayer, do not block the back navigation
+        triggerMiniplayer();
+    }
+}, true); // 'true' catches it first
 
     // ==========================================
     // 2. THE LOGO / HOME BUTTON CLICK
