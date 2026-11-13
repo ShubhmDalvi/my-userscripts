@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Music Tab Fullscreen & Auto-Hide Controls
 // @namespace    https://tampermonkey.net/
-// @version      2.1
+// @version      2.2
 // @description  Double-click the player for tab-fullscreen (Theater Mode) with auto-hiding controls. The native fullscreen button now triggers true browser fullscreen instead.
 // @author       you
 // @match        https://music.youtube.com/*
@@ -25,6 +25,9 @@
   const ACTIVE_CLASS = 'ytm-theater-active';
   const IDLE_CLASS = 'ytm-idle';
   const PARENT_CLEAN_CLASS = 'ytm-parent-clean';
+  // YouTube Music replaced <ytmusic-player-bar> with <ytmusic-miniplayer slot="player-bar">.
+  // Both are listed so the script keeps working if the layout flips back.
+  const BAR_SELECTOR = 'ytmusic-miniplayer, ytmusic-player-bar';
   let isTheater = false;
   let idleTimer = null;
   let isMouseOverControls = false;
@@ -105,20 +108,20 @@
       justify-content: center !important;
     }
 
-	html.${ACTIVE_CLASS} ytmusic-player-page #player.ytmusic-player-page,
-html.${ACTIVE_CLASS} ytmusic-player#player {
-  max-width: 100vw !important;
-}
+    html.${ACTIVE_CLASS} ytmusic-player-page #player.ytmusic-player-page,
+    html.${ACTIVE_CLASS} ytmusic-player#player {
+      max-width: 100vw !important;
+    }
 
     /* Keep the album art at its native responsive centered square layout */
     html.${ACTIVE_CLASS} ytmusic-player #song-image {
-  margin: auto !important;
-  padding-top: 0 !important;
-  width: min(100vw, 100vh) !important;
-  height: min(100vw, 100vh) !important;
-  max-width: 100vh !important;
-  max-height: 100vh !important;
-}
+      margin: auto !important;
+      padding-top: 0 !important;
+      width: min(100vw, 100vh) !important;
+      height: min(100vw, 100vh) !important;
+      max-width: 100vh !important;
+      max-height: 100vh !important;
+    }
 
     /* Force all video wrappers to scale and fill the fixed parent */
     html.${ACTIVE_CLASS} ytmusic-player #movie_player,
@@ -138,6 +141,7 @@ html.${ACTIVE_CLASS} ytmusic-player#player {
     /* ---------------------------------------------------------------
        4. Position & Style Bottom Player Controls (Traditional Fullscreen Look)
        --------------------------------------------------------------- */
+    html.${ACTIVE_CLASS} ytmusic-miniplayer,
     html.${ACTIVE_CLASS} ytmusic-player-bar {
       position: fixed !important;
       bottom: 0 !important;
@@ -155,22 +159,23 @@ html.${ACTIVE_CLASS} ytmusic-player#player {
       border: none !important;
     }
 
-html.${ACTIVE_CLASS} ytmusic-player #song-image {
-  position: relative !important;
-}
+    html.${ACTIVE_CLASS} ytmusic-player #song-image {
+      position: relative !important;
+    }
 
-html.${ACTIVE_CLASS} ytmusic-player #song-image #thumbnail,
-html.${ACTIVE_CLASS} ytmusic-player #song-image yt-img-shadow,
-html.${ACTIVE_CLASS} ytmusic-player #song-image img {
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: contain !important;
-}
+    html.${ACTIVE_CLASS} ytmusic-player #song-image #thumbnail,
+    html.${ACTIVE_CLASS} ytmusic-player #song-image yt-img-shadow,
+    html.${ACTIVE_CLASS} ytmusic-player #song-image img {
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: contain !important;
+    }
 
     /* Smooth Slide-down Hide when Idle (bottom bar) */
+    html.${ACTIVE_CLASS}.${IDLE_CLASS} ytmusic-miniplayer,
     html.${ACTIVE_CLASS}.${IDLE_CLASS} ytmusic-player-bar {
       opacity: 0 !important;
       pointer-events: none !important;
@@ -327,6 +332,26 @@ html.${ACTIVE_CLASS} ytmusic-player #song-image img {
   }
 
   /*
+   * In true fullscreen YouTube Music applies its OWN bar behavior (the bar
+   * only shows when hovering the seek bar). Our auto-hide CSS/JS only runs
+   * while theater mode is active, so switch theater styling on automatically
+   * when entering true fullscreen, and off again when leaving it (only if we
+   * were the ones who turned it on).
+   */
+  let autoTheaterForFullscreen = false;
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement) {
+      if (!isTheater) {
+        autoTheaterForFullscreen = true;
+        toggleTheaterMode(true);
+      }
+    } else if (autoTheaterForFullscreen) {
+      autoTheaterForFullscreen = false;
+      if (isTheater) toggleTheaterMode(false);
+    }
+  });
+
+  /*
    * Intercept clicks on the native "Fullscreen" button before YouTube Music
    * gets them. It now ALWAYS triggers true browser fullscreen — theater
    * mode has moved to double-clicking the player (see dblclick handler
@@ -348,12 +373,12 @@ html.${ACTIVE_CLASS} ytmusic-player #song-image img {
    * the capture phase so we run first and can stopPropagation to fully
    * block the native behavior, replacing it with theater mode instead.
    *
-   * We explicitly exclude the bottom control bar (ytmusic-player-bar) and
-   * the fullscreen button itself, so double-clicking play/pause, the
-   * scrubber, volume, etc. still behaves normally.
+   * We explicitly exclude the bottom control bar and the fullscreen button
+   * itself, so double-clicking play/pause, the scrubber, volume, etc.
+   * still behaves normally.
    */
   document.addEventListener('dblclick', (e) => {
-    if (e.target.closest('ytmusic-player-bar')) return;
+    if (e.target.closest(BAR_SELECTOR)) return;
     if (e.target.closest('.fullscreen-button, .ytp-fullscreen-button')) return;
 
     const onPlayerSurface = e.target.closest(
@@ -368,7 +393,7 @@ html.${ACTIVE_CLASS} ytmusic-player #song-image img {
   }, true);
 
   /*
-   * Add Keyboard Shortcuts (F to toggle, Esc to exit)
+   * Add Keyboard Shortcuts (T to toggle, Esc to exit)
    */
   document.addEventListener('keydown', (e) => {
     if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
@@ -388,14 +413,23 @@ html.${ACTIVE_CLASS} ytmusic-player #song-image img {
   /*
    * Track mouse movement for the auto-hide controls
    */
-  document.addEventListener('mousemove', (e) => {
+  function onPointerActivity(e) {
     if (!isTheater) return;
 
-    // Check if mouse is in the bottom 110px of the screen (where the controls are)
-    const windowHeight = window.innerHeight;
-    isMouseOverControls = (e.clientY > windowHeight - 110);
+    // Use the real bar height (+20px margin) instead of a fixed value,
+    // since the new miniplayer bar has a different height.
+    const bar = document.querySelector(BAR_SELECTOR);
+    const h = bar ? bar.getBoundingClientRect().height + 20 : 130;
+    isMouseOverControls = (e.clientY > window.innerHeight - h);
 
     resetIdleTimer();
-  });
+  }
+
+  // Listen on window in the CAPTURE phase so the video player (which can
+  // stop mouse events from bubbling up) can't swallow them. Without this,
+  // the bar only reappeared when the pointer was over the seek bar.
+  window.addEventListener('mousemove', onPointerActivity, true);
+  window.addEventListener('pointermove', onPointerActivity, true);
+  window.addEventListener('mousedown', onPointerActivity, true);
 
 })();
