@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Music Tab Fullscreen & Auto-Hide Controls
 // @namespace    https://tampermonkey.net/
-// @version      2.2
-// @description  Double-click the player for tab-fullscreen (Theater Mode) with auto-hiding controls. The native fullscreen button now triggers true browser fullscreen instead.
+// @version      2.3
+// @description  Double-click the player for tab-fullscreen (Theater Mode) with auto-hiding controls. Bottom bar starts hidden and appears only on real mouse movement. The native fullscreen button triggers true browser fullscreen.
 // @author       you
 // @match        https://music.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=music.youtube.com
@@ -28,10 +28,22 @@
   // YouTube Music replaced <ytmusic-player-bar> with <ytmusic-miniplayer slot="player-bar">.
   // Both are listed so the script keeps working if the layout flips back.
   const BAR_SELECTOR = 'ytmusic-miniplayer, ytmusic-player-bar';
+
+  // NEW: settings for the "start hidden" behavior
+  const ENTER_GRACE_MS = 300;   // ignore pointer activity this long after entering theater mode
+  const MOVE_THRESHOLD_PX = 5;  // real movement needed to reveal the bar after entering
+
   let isTheater = false;
   let idleTimer = null;
   let isMouseOverControls = false;
   let originalNavBarHeight = null;
+
+  // NEW: pointer tracking
+  let lastMouseX = 0;
+  let lastMouseY = 0;
+  let theaterEnteredAt = 0;
+  let anchorX = null; // position of the mouse when theater mode started
+  let anchorY = null;
 
   const CSS = `
     /* ---------------------------------------------------------------
@@ -256,16 +268,29 @@
     }
 
     if (isTheater) {
+      // CHANGED: start with the bar already hidden (IDLE_CLASS added together
+      // with ACTIVE_CLASS) instead of showing it and waiting 2 seconds.
       document.documentElement.classList.add(ACTIVE_CLASS);
+      document.documentElement.classList.add(IDLE_CLASS);
+      clearTimeout(idleTimer);
+      isMouseOverControls = false;
+
+      // NEW: remember where the mouse is right now and when we entered, so
+      // layout-shift jitter doesn't reveal the bar immediately.
+      theaterEnteredAt = Date.now();
+      anchorX = lastMouseX;
+      anchorY = lastMouseY;
+
       updateNavBarHeight(true); // Set --ytmusic-nav-bar-height to 0px on ytmusic-app-layout only
       cleanParents(true); // Clean the parent chain dynamically
-      resetIdleTimer();
     } else {
       document.documentElement.classList.remove(ACTIVE_CLASS);
       document.documentElement.classList.remove(IDLE_CLASS);
       updateNavBarHeight(false); // Restore original layout value
       cleanParents(false); // Restore parent chain
       clearTimeout(idleTimer);
+      anchorX = null;
+      anchorY = null;
     }
     // Nudge the window to force YTM to recalculate sizes instantly
     setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
@@ -353,9 +378,9 @@
 
   /*
    * Intercept clicks on the native "Fullscreen" button before YouTube Music
-   * gets them. It now ALWAYS triggers true browser fullscreen — theater
-   * mode has moved to double-clicking the player (see dblclick handler
-   * below), so this button no longer needs to do double duty.
+   * gets them. It ALWAYS triggers true browser fullscreen — theater
+   * mode is toggled by double-clicking the player (see dblclick handler
+   * below), so this button doesn't need to do double duty.
    */
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('button[title*="full screen" i], button[aria-label*="full screen" i], .ytp-fullscreen-button, .fullscreen-button');
@@ -414,7 +439,33 @@
    * Track mouse movement for the auto-hide controls
    */
   function onPointerActivity(e) {
+    // NEW: always remember the latest pointer position (even outside theater
+    // mode) so we know where the mouse is at the moment theater mode starts.
+    if (typeof e.clientX === 'number') {
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+    }
+
     if (!isTheater) return;
+
+    // NEW: grace period right after entering theater mode. Layout changes
+    // can fire fake mousemove events under a stationary cursor, so ignore
+    // them and keep the anchor updated to the current position.
+    if (Date.now() - theaterEnteredAt < ENTER_GRACE_MS) {
+      anchorX = lastMouseX;
+      anchorY = lastMouseY;
+      return;
+    }
+
+    // NEW: after the grace period, a mouse *move* must travel a real distance
+    // from the anchor before it reveals the bar. Clicks (mousedown) always count.
+    if (anchorX !== null && e.type !== 'mousedown') {
+      const dx = lastMouseX - anchorX;
+      const dy = lastMouseY - anchorY;
+      if (Math.hypot(dx, dy) < MOVE_THRESHOLD_PX) return;
+    }
+    anchorX = null; // real movement happened; normal behavior from here on
+    anchorY = null;
 
     // Use the real bar height (+20px margin) instead of a fixed value,
     // since the new miniplayer bar has a different height.
