@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Music Tab Fullscreen & Auto-Hide Controls
 // @namespace    https://tampermonkey.net/
-// @version      2.3
+// @version      2.3.1
 // @description  Double-click the player for tab-fullscreen (Theater Mode) with auto-hiding controls. Bottom bar starts hidden and appears only on real mouse movement. The native fullscreen button triggers true browser fullscreen.
 // @author       you
 // @match        https://music.youtube.com/*
@@ -29,7 +29,8 @@
   // Both are listed so the script keeps working if the layout flips back.
   const BAR_SELECTOR = 'ytmusic-miniplayer, ytmusic-player-bar';
 
-  // NEW: settings for the "start hidden" behavior
+  // Tunable timing values
+  const IDLE_HIDE_MS = 2000;    // hide the bar this long after the last real mouse movement
   const ENTER_GRACE_MS = 300;   // ignore pointer activity this long after entering theater mode
   const MOVE_THRESHOLD_PX = 5;  // real movement needed to reveal the bar after entering
 
@@ -38,7 +39,7 @@
   let isMouseOverControls = false;
   let originalNavBarHeight = null;
 
-  // NEW: pointer tracking
+  // Pointer tracking
   let lastMouseX = 0;
   let lastMouseY = 0;
   let theaterEnteredAt = 0;
@@ -71,9 +72,8 @@
       display: none !important;
     }
 
-    /* Fullscreen button is no longer needed in theater mode (double-click
-       toggles theater mode now, and the native button does true fullscreen
-       instead), so just hide it completely while theater mode is active. */
+    /* Double-click toggles theater mode, and the native button does true
+       fullscreen, so the in-player fullscreen button is hidden in theater mode. */
     html.${ACTIVE_CLASS} ytmusic-player .fullscreen-button {
       display: none !important;
     }
@@ -85,8 +85,18 @@
 
     html.${ACTIVE_CLASS} ytmusic-player-page {
       width: 100vw !important;
-      max-width: 100vw !important;
       height: 100vh !important;
+    }
+
+        /* Remove the dark shade on the album art/video when the mouse is over the
+       player. Only the background is removed; the image, video, and clicks
+       are unaffected. */
+    html.${ACTIVE_CLASS} #song-media-window,
+    html.${ACTIVE_CLASS} #song-media-window::before,
+    html.${ACTIVE_CLASS} #song-media-window::after {
+      background: none !important;
+      background-image: none !important;
+      box-shadow: none !important;
     }
 
     /* ---------------------------------------------------------------
@@ -127,12 +137,11 @@
 
     /* Keep the album art at its native responsive centered square layout */
     html.${ACTIVE_CLASS} ytmusic-player #song-image {
+      position: relative !important;
       margin: auto !important;
       padding-top: 0 !important;
       width: min(100vw, 100vh) !important;
       height: min(100vw, 100vh) !important;
-      max-width: 100vh !important;
-      max-height: 100vh !important;
     }
 
     /* Force all video wrappers to scale and fill the fixed parent */
@@ -169,10 +178,6 @@
       /* Smooth transparent gradient so video bleeds through underneath */
       background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 60%, transparent 100%) !important;
       border: none !important;
-    }
-
-    html.${ACTIVE_CLASS} ytmusic-player #song-image {
-      position: relative !important;
     }
 
     html.${ACTIVE_CLASS} ytmusic-player #song-image #thumbnail,
@@ -223,7 +228,8 @@
     if (!layout) return;
 
     if (enable) {
-      // Store the original layout value before modifying it
+      // Store the original layout value before modifying it.
+      // '64px' is the assumed default if YT Music doesn't expose the variable.
       if (originalNavBarHeight === null) {
         originalNavBarHeight = layout.style.getPropertyValue('--ytmusic-nav-bar-height') ||
                                window.getComputedStyle(layout).getPropertyValue('--ytmusic-nav-bar-height').trim() ||
@@ -268,15 +274,14 @@
     }
 
     if (isTheater) {
-      // CHANGED: start with the bar already hidden (IDLE_CLASS added together
-      // with ACTIVE_CLASS) instead of showing it and waiting 2 seconds.
+      // Start with the bar already hidden, so it never flashes on entry
       document.documentElement.classList.add(ACTIVE_CLASS);
       document.documentElement.classList.add(IDLE_CLASS);
       clearTimeout(idleTimer);
       isMouseOverControls = false;
 
-      // NEW: remember where the mouse is right now and when we entered, so
-      // layout-shift jitter doesn't reveal the bar immediately.
+      // Remember where the mouse is and when we entered, so layout-shift
+      // jitter doesn't reveal the bar immediately.
       theaterEnteredAt = Date.now();
       anchorX = lastMouseX;
       anchorY = lastMouseY;
@@ -307,7 +312,7 @@
       if (!isMouseOverControls) {
         document.documentElement.classList.add(IDLE_CLASS);
       }
-    }, 2000); // 2 seconds before hiding
+    }, IDLE_HIDE_MS);
   }
 
   /*
@@ -378,9 +383,8 @@
 
   /*
    * Intercept clicks on the native "Fullscreen" button before YouTube Music
-   * gets them. It ALWAYS triggers true browser fullscreen — theater
-   * mode is toggled by double-clicking the player (see dblclick handler
-   * below), so this button doesn't need to do double duty.
+   * gets them. It ALWAYS triggers true browser fullscreen. Theater mode is
+   * toggled by double-clicking the player (see dblclick handler below).
    */
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('button[title*="full screen" i], button[aria-label*="full screen" i], .ytp-fullscreen-button, .fullscreen-button');
@@ -418,7 +422,7 @@
   }, true);
 
   /*
-   * Add Keyboard Shortcuts (T to toggle, Esc to exit)
+   * Keyboard shortcuts (T to toggle, Esc to exit)
    */
   document.addEventListener('keydown', (e) => {
     if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
@@ -436,10 +440,10 @@
   }, true);
 
   /*
-   * Track mouse movement for the auto-hide controls
+   * Track pointer activity for the auto-hide controls
    */
   function onPointerActivity(e) {
-    // NEW: always remember the latest pointer position (even outside theater
+    // Always remember the latest pointer position (even outside theater
     // mode) so we know where the mouse is at the moment theater mode starts.
     if (typeof e.clientX === 'number') {
       lastMouseX = e.clientX;
@@ -448,17 +452,17 @@
 
     if (!isTheater) return;
 
-    // NEW: grace period right after entering theater mode. Layout changes
-    // can fire fake mousemove events under a stationary cursor, so ignore
-    // them and keep the anchor updated to the current position.
+    // Grace period right after entering theater mode. Layout changes can
+    // fire fake move events under a stationary cursor, so ignore them and
+    // keep the anchor updated to the current position.
     if (Date.now() - theaterEnteredAt < ENTER_GRACE_MS) {
       anchorX = lastMouseX;
       anchorY = lastMouseY;
       return;
     }
 
-    // NEW: after the grace period, a mouse *move* must travel a real distance
-    // from the anchor before it reveals the bar. Clicks (mousedown) always count.
+    // After the grace period, a move must travel a real distance from the
+    // anchor before it reveals the bar. Clicks (mousedown) always count.
     if (anchorX !== null && e.type !== 'mousedown') {
       const dx = lastMouseX - anchorX;
       const dy = lastMouseY - anchorY;
@@ -468,7 +472,7 @@
     anchorY = null;
 
     // Use the real bar height (+20px margin) instead of a fixed value,
-    // since the new miniplayer bar has a different height.
+    // since the miniplayer bar has a different height.
     const bar = document.querySelector(BAR_SELECTOR);
     const h = bar ? bar.getBoundingClientRect().height + 20 : 130;
     isMouseOverControls = (e.clientY > window.innerHeight - h);
@@ -477,9 +481,8 @@
   }
 
   // Listen on window in the CAPTURE phase so the video player (which can
-  // stop mouse events from bubbling up) can't swallow them. Without this,
-  // the bar only reappeared when the pointer was over the seek bar.
-  window.addEventListener('mousemove', onPointerActivity, true);
+  // stop mouse events from bubbling up) can't swallow them. pointermove
+  // covers mouse input in modern browsers, so mousemove isn't needed.
   window.addEventListener('pointermove', onPointerActivity, true);
   window.addEventListener('mousedown', onPointerActivity, true);
 
